@@ -219,6 +219,29 @@
             font-size: 13px;
         }
         
+        /* 面包屑导航 */
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .breadcrumb a {
+            color: var(--lanzou-blue);
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        .breadcrumb-separator {
+            margin: 0 5px;
+            color: var(--lanzou-text-light);
+        }
+        
         /* 响应式 */
         @media (max-width: 768px) {
             .container { padding: 15px; }
@@ -255,10 +278,15 @@
             </div>
         </div>
         
+        <!-- 面包屑导航 -->
+        <div class="breadcrumb" id="breadcrumb">
+            <a href="javascript:void(0)" onclick="loadFiles('')">首页</a>
+        </div>
+        
         <!-- 文件列表 -->
         <div class="files-card">
             <div class="files-header">
-                <h2 class="section-title">文件列表</h2>
+                <h2 class="section-title" id="current-path-title">文件列表</h2>
                 <div>
                     <button id="refresh-btn" class="download-btn">
                         <i class="fas fa-redo"></i> 刷新
@@ -310,24 +338,41 @@
             'iso': '💿', 'img': '💿'
         };
 
+        // 当前浏览路径
+        let currentPath = '';
+
         // 主函数：加载文件
-        async function loadFiles() {
+        async function loadFiles(path = '') {
             const contentEl = document.getElementById('content');
             const fileCountEl = document.getElementById('file-count');
             const folderCountEl = document.getElementById('folder-count');
             const totalSizeEl = document.getElementById('total-size');
+            const pathTitleEl = document.getElementById('current-path-title');
+            const breadcrumbEl = document.getElementById('breadcrumb');
+            
+            currentPath = path;
             
             try {
                 // 显示加载中
                 contentEl.innerHTML = `
                     <div class="loading">
                         <div class="loading-spinner"></div>
-                        <p>正在从 GitHub 加载文件列表...</p>
+                        <p>正在加载文件列表...</p>
                     </div>
                 `;
                 
+                // 更新页面标题
+                updatePageTitle(currentPath);
+                
+                // 更新面包屑导航
+                updateBreadcrumb(currentPath, breadcrumbEl);
+                
                 // 调用 GitHub API
-                const response = await fetch(API_URL, {
+                const apiUrl = currentPath ? 
+                    `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${encodeURIComponent(currentPath)}` : 
+                    API_URL;
+                
+                const response = await fetch(apiUrl, {
                     headers: {
                         'Accept': 'application/vnd.github.v3+json',
                         'User-Agent': 'lanzouy-cloud'
@@ -371,7 +416,7 @@
                 totalSizeEl.textContent = formatFileSize(totalSize);
                 
                 if (files.length === 0 && folders.length === 0) {
-                    contentEl.innerHTML = '<div class="empty"><p>仓库是空的，还没有上传文件</p></div>';
+                    contentEl.innerHTML = '<div class="empty"><p>此文件夹为空</p></div>';
                     return;
                 }
                 
@@ -389,21 +434,43 @@
                         <tbody>
                 `;
                 
+                // 添加返回上级按钮（如果不是根目录）
+                if (currentPath) {
+                    const parentPath = getParentPath(currentPath);
+                    html += `
+                        <tr class="folder-row">
+                            <td class="file-name-cell">
+                                <div class="file-icon folder-icon">⬆️</div>
+                                <a href="javascript:void(0)" onclick="loadFiles('${parentPath}')" class="file-link">返回上级</a>
+                            </td>
+                            <td class="file-size">-</td>
+                            <td class="file-date">-</td>
+                            <td>
+                                <button onclick="loadFiles('${parentPath}')" class="download-btn">
+                                    <i class="fas fa-folder-open"></i> 打开
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }
+                
                 // 添加文件夹
                 folders.forEach(folder => {
-                    const date = new Date(folder.updated_at || folder.created_at || Date.now()).toLocaleDateString();
+                    const date = formatDate(folder.updated_at || folder.created_at);
+                    const folderPath = currentPath ? `${currentPath}/${folder.name}` : folder.name;
+                    
                     html += `
                         <tr class="folder-row">
                             <td class="file-name-cell">
                                 <div class="file-icon folder-icon">📁</div>
-                                <a href="${folder.html_url}" class="file-link" target="_blank">${folder.name}/</a>
+                                <a href="javascript:void(0)" onclick="loadFiles('${folderPath}')" class="file-link">${folder.name}/</a>
                             </td>
                             <td class="file-size">-</td>
                             <td class="file-date">${date}</td>
                             <td>
-                                <a href="${folder.html_url}" class="download-btn" target="_blank">
-                                    <i class="fas fa-external-link-alt"></i> 查看
-                                </a>
+                                <button onclick="loadFiles('${folderPath}')" class="download-btn">
+                                    <i class="fas fa-folder-open"></i> 打开
+                                </button>
                             </td>
                         </tr>
                     `;
@@ -413,8 +480,11 @@
                 files.forEach(file => {
                     const icon = getFileIcon(file.name);
                     const size = formatFileSize(file.size);
-                    const date = new Date(file.updated_at || file.created_at || Date.now()).toLocaleDateString();
-                    const downloadUrl = file.download_url || file.html_url;
+                    const date = formatDate(file.updated_at || file.created_at);
+                    
+                    // 构建在当前域名下的文件访问路径
+                    const filePath = currentPath ? `${currentPath}/${file.name}` : file.name;
+                    const downloadUrl = `/${filePath}`; // 关键修改：使用相对路径
                     
                     html += `
                         <tr>
@@ -425,7 +495,7 @@
                             <td class="file-size">${size}</td>
                             <td class="file-date">${date}</td>
                             <td>
-                                <a href="${downloadUrl}" class="download-btn" target="_blank">
+                                <a href="${downloadUrl}" class="download-btn" download="${file.name}">
                                     <i class="fas fa-download"></i> 下载
                                 </a>
                             </td>
@@ -445,13 +515,7 @@
                     <div class="error">
                         <p><i class="fas fa-exclamation-triangle"></i> 加载失败</p>
                         <p style="margin-top: 10px; font-size: 14px;">错误信息: ${error.message}</p>
-                        <p style="margin-top: 10px; font-size: 13px;">
-                            请检查: 
-                            <br>1. 仓库 ${GITHUB_USER}/${GITHUB_REPO} 是否存在且为公开
-                            <br>2. 网络连接是否正常
-                            <br>3. GitHub API 是否可用
-                        </p>
-                        <button onclick="loadFiles()" class="download-btn" style="margin-top: 15px;">
+                        <button onclick="loadFiles(currentPath)" class="download-btn" style="margin-top: 15px;">
                             <i class="fas fa-redo"></i> 重试
                         </button>
                     </div>
@@ -467,34 +531,90 @@
         
         // 格式化文件大小
         function formatFileSize(bytes) {
-            if (bytes === 0) return '0 B';
+            if (!bytes || bytes === 0) return '0 B';
             const k = 1024;
             const sizes = ['B', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
         
+        // 格式化日期
+        function formatDate(dateString) {
+            if (!dateString) return '-';
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString('zh-CN');
+            } catch (e) {
+                return '-';
+            }
+        }
+        
+        // 获取父路径
+        function getParentPath(path) {
+            if (!path) return '';
+            const parts = path.split('/');
+            parts.pop();
+            return parts.join('/');
+        }
+        
+        // 更新页面标题
+        function updatePageTitle(path) {
+            const pathTitleEl = document.getElementById('current-path-title');
+            if (pathTitleEl) {
+                const baseTitle = '文件列表';
+                pathTitleEl.textContent = path ? `${baseTitle}: /${path}` : baseTitle;
+            }
+        }
+        
+        // 更新面包屑导航
+        function updateBreadcrumb(path, breadcrumbEl) {
+            if (!breadcrumbEl) return;
+            
+            let html = '<a href="javascript:void(0)" onclick="loadFiles(\'\')">首页</a>';
+            
+            if (path) {
+                const parts = path.split('/');
+                let currentPath = '';
+                
+                parts.forEach((part, index) => {
+                    currentPath = currentPath ? `${currentPath}/${part}` : part;
+                    html += `<span class="breadcrumb-separator">/</span>`;
+                    if (index === parts.length - 1) {
+                        html += `<span>${part}</span>`;
+                    } else {
+                        html += `<a href="javascript:void(0)" onclick="loadFiles('${currentPath}')">${part}</a>`;
+                    }
+                });
+            }
+            
+            breadcrumbEl.innerHTML = html;
+        }
+        
         // 设置搜索功能
         function setupSearch() {
             const searchInput = document.getElementById('search-input');
-            searchInput.addEventListener('input', function() {
-                const searchTerm = this.value.toLowerCase();
-                const rows = document.querySelectorAll('.files-table tbody tr');
-                
-                rows.forEach(row => {
-                    const fileName = row.querySelector('.file-link').textContent.toLowerCase();
-                    if (fileName.includes(searchTerm)) {
-                        row.style.display = '';
-                    } else {
-                        row.style.display = 'none';
-                    }
+            if (searchInput) {
+                searchInput.value = ''; // 清空搜索框
+                searchInput.addEventListener('input', function() {
+                    const searchTerm = this.value.toLowerCase();
+                    const rows = document.querySelectorAll('.files-table tbody tr');
+                    
+                    rows.forEach(row => {
+                        const fileNameCell = row.querySelector('.file-link');
+                        if (fileNameCell) {
+                            const fileName = fileNameCell.textContent.toLowerCase();
+                            row.style.display = fileName.includes(searchTerm) ? '' : 'none';
+                        }
+                    });
                 });
-            });
+            }
         }
         
         // 排序功能
         function sortTable(column) {
             const tbody = document.querySelector('.files-table tbody');
+            if (!tbody) return;
+            
             const rows = Array.from(tbody.querySelectorAll('tr'));
             
             rows.sort((a, b) => {
@@ -510,25 +630,25 @@
                 }
             });
             
-            // 重新排列行
             rows.forEach(row => tbody.appendChild(row));
         }
         
         function getCellValue(row, column) {
             const cellIndex = { name: 0, size: 1, date: 2 }[column];
-            return row.cells[cellIndex].textContent.trim();
+            const cell = row.cells[cellIndex];
+            return cell ? cell.textContent.trim() : '';
         }
         
         // 页面加载完成后执行
-        document.addEventListener('DOMContentLoaded', loadFiles);
+        document.addEventListener('DOMContentLoaded', () => loadFiles(''));
         
         // 刷新按钮
-        document.getElementById('refresh-btn').addEventListener('click', loadFiles);
+        document.getElementById('refresh-btn').addEventListener('click', () => loadFiles(currentPath));
         
         // 搜索框回车键搜索
-        document.getElementById('search-input').addEventListener('keypress', function(e) {
+        document.getElementById('search-input')?.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                loadFiles();
+                loadFiles(currentPath);
             }
         });
     </script>
